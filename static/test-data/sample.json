@@ -1,0 +1,32 @@
+{
+  "nodes": [
+    {
+      "id": "node1",
+      "type": "utility_pole",
+      "position": {
+        "x": 100,
+        "y": 100,
+        "z": 0
+      },
+      "height": 40
+    },
+    {
+      "id": "node2",
+      "type": "utility_pole",
+      "position": {
+        "x": 200,
+        "y": 100,
+        "z": 0
+      },
+      "height": 35
+    }
+  ],
+  "connections": [
+    {
+      "id": "conn1",
+      "from": "node1",
+      "to": "node2",
+      "type": "messenger_wire"
+    }
+  ]
+}

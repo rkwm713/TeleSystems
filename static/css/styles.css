@@ -1,0 +1,208 @@
+/* Main Styles for Katapult Report Generator */
+
+body {
+    background-color: #f8f9fa;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    color: #333;
+}
+
+.container {
+    max-width: 1140px;
+}
+
+/* Card Styling */
+.card {
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    transition: box-shadow 0.3s ease;
+}
+
+.card:hover {
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+}
+
+.card-header {
+    padding: 1.5rem;
+    border-bottom: none;
+}
+
+.card-body {
+    padding: 2rem;
+}
+
+.card-footer {
+    padding: 1rem 1.5rem;
+    background-color: #f9fbfd;
+    border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+/* Header Styling */
+.bg-primary {
+    background-color: #3b7ddd !important;
+}
+
+.bg-success {
+    background-color: #4caf50 !important;
+}
+
+.bg-danger {
+    background-color: #f44336 !important;
+}
+
+/* File Upload Styling */
+.file-upload-area {
+    border: 2px dashed #cfd8dc;
+    border-radius: 10px;
+    padding: 2rem;
+    text-align: center;
+    transition: all 0.3s ease;
+    cursor: pointer;
+    background-color: #f9fbfd;
+}
+
+.file-upload-area:hover {
+    border-color: #3b7ddd;
+    background-color: rgba(59, 125, 221, 0.03);
+}
+
+.file-upload-area.dragover {
+    border-color: #3b7ddd;
+    background-color: rgba(59, 125, 221, 0.1);
+    transform: scale(1.01);
+}
+
+.file-upload-area.file-selected {
+    border-style: solid;
+    border-color: #4caf50;
+    background-color: rgba(76, 175, 80, 0.03);
+}
+
+#drop-area {
+    min-height: 220px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* File Details Card */
+#file-details .card {
+    transition: all 0.3s ease;
+}
+
+#file-details .card:hover {
+    transform: translateY(-2px);
+}
+
+/* Stats Section */
+.alert-info {
+    background-color: #e3f2fd;
+    border-color: #90caf9;
+    color: #0d47a1;
+}
+
+.alert-danger {
+    background-color: #ffebee;
+    border-color: #ffcdd2;
+    color: #b71c1c;
+}
+
+.alert-warning {
+    background-color: #fff8e1;
+    border-color: #ffecb3;
+    color: #f57f17;
+}
+
+.alert-success {
+    background-color: #e8f5e9;
+    border-color: #c8e6c9;
+    color: #2e7d32;
+}
+
+/* Button States */
+.btn-primary {
+    background-color: #3b7ddd;
+    border-color: #3b7ddd;
+}
+
+.btn-primary:hover, .btn-primary:focus {
+    background-color: #2d66c3;
+    border-color: #2d66c3;
+}
+
+.btn-primary:disabled {
+    background-color: #7fa9e6;
+    border-color: #7fa9e6;
+}
+
+/* Processing State */
+.processing .file-upload-area {
+    opacity: 0.7;
+    pointer-events: none;
+}
+
+/* Progress and Loading Indicators */
+#loading-spinner {
+    margin-left: 0.5rem;
+}
+
+.spinner-border-sm {
+    width: 1rem;
+    height: 1rem;
+    border-width: 0.2em;
+}
+
+/* Animations */
+.fade-in {
+    animation: fadeIn 0.5s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Hover Effects */
+.file-upload-area label.btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+#remove-file:hover {
+    background-color: #ffebee;
+    color: #c62828;
+}
+
+/* Responsive Adjustments */
+@media (max-width: 768px) {
+    .card-body {
+        padding: 1.5rem;
+    }
+    
+    .card-header {
+        padding: 1.25rem;
+    }
+    
+    #drop-area {
+        min-height: 180px;
+    }
+    
+    .file-upload-area {
+        padding: 1.5rem;
+    }
+}
+
+@media (max-width: 576px) {
+    .container {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+    
+    .card-body {
+        padding: 1.25rem;
+    }
+    
+    #drop-area {
+        min-height: 160px;
+    }
+}
