@@ -18,13 +18,15 @@ from .movement_processing import get_movement_summary, generate_remedy_descripti
 from .excel_generator import create_output_excel
 
 
-def process_katapult_json(json_path, output_excel_path):
+def process_katapult_json(katapult_json_path, output_excel_path, spidacalc_json_path=None):
     """
-    Main function to process a Katapult JSON file and generate an Excel report.
+    Main function to process Katapult JSON (and optionally SPIDAcalc JSON) 
+    and generate an Excel report.
     
     Args:
-        json_path (str): Path to the Katapult JSON file
+        katapult_json_path (str): Path to the Katapult JSON file
         output_excel_path (str): Path where the Excel report will be saved
+        spidacalc_json_path (str, optional): Path to the SPIDAcalc JSON file. Defaults to None.
         
     Returns:
         dict: Statistics about the processing
@@ -32,28 +34,42 @@ def process_katapult_json(json_path, output_excel_path):
     start_time = time.time()
     
     try:
-        # Load the JSON file
-        print(f"Loading JSON file from {json_path}...")
-        with open(json_path, 'r', encoding='utf-8') as file:
-            job_data = json.load(file)
-        print(f"JSON file loaded successfully.")
-            
+        # Load the Katapult JSON file
+        print(f"Loading Katapult JSON file from {katapult_json_path}...")
+        with open(katapult_json_path, 'r', encoding='utf-8') as file:
+            katapult_data = json.load(file)
+        print(f"Katapult JSON file loaded successfully.")
+
+        spidacalc_data = None
+        if spidacalc_json_path:
+            try:
+                print(f"Loading SPIDAcalc JSON file from {spidacalc_json_path}...")
+                with open(spidacalc_json_path, 'r', encoding='utf-8') as file:
+                    spidacalc_data = json.load(file)
+                print(f"SPIDAcalc JSON file loaded successfully.")
+            except FileNotFoundError:
+                print(f"Warning: SPIDAcalc JSON file not found at {spidacalc_json_path}. Proceeding without SPIDAcalc data.")
+            except json.JSONDecodeError as e:
+                print(f"Warning: Error decoding SPIDAcalc JSON from {spidacalc_json_path}: {e}. Proceeding without SPIDAcalc data.")
+            except Exception as e:
+                print(f"Warning: An unexpected error occurred while loading SPIDAcalc JSON from {spidacalc_json_path}: {e}. Proceeding without SPIDAcalc data.")
+
         # Process the data
         print("Processing data...")
-        df = process_data(job_data, None)  # No GeoJSON for now
+        df = process_data(katapult_data, spidacalc_data, None)  # No GeoJSON for now
         
         if df.empty:
-            print("ERROR: No data could be extracted from the JSON file.")
+            print("ERROR: No data could be extracted from the Katapult JSON file.")
             return {
                 "status": "error",
-                "message": "No data could be extracted from the JSON file."
+                "message": "No data could be extracted from the Katapult JSON file."
             }
         
         print(f"Data processed successfully. Generated {len(df)} records.")
             
         # Create Excel file
         print(f"Creating Excel file at {output_excel_path}...")
-        create_output_excel(output_excel_path, df, job_data)
+        create_output_excel(output_excel_path, df, katapult_data) # Pass katapult_data for now for excel generation context
         print(f"Excel file created successfully at {output_excel_path}.")
         
         # Gather statistics
@@ -74,7 +90,8 @@ def process_katapult_json(json_path, output_excel_path):
             for _, record in df.iterrows():
                 node_id = record['node_id_1']
                 if node_id: # Ensure node_id is not None or empty
-                    attachers = get_attachers_for_node(job_data, node_id)
+                    # TODO: Update get_attachers_for_node to potentially use spidacalc_data if needed for stats
+                    attachers = get_attachers_for_node(katapult_data, node_id)
                     main_attachers = attachers.get('main_attachers', [])
                     
                     attacher_count += len(main_attachers)
@@ -98,14 +115,16 @@ def process_katapult_json(json_path, output_excel_path):
         }
 
 
-def process_data(job_data, geojson_path):
+def process_data(katapult_data, spidacalc_data, geojson_path):
     """
-    Process Katapult job data and optionally geojson into a DataFrame with comprehensive pole and connection information.
+    Process Katapult job data (and optionally SPIDAcalc data and geojson) 
+    into a DataFrame with comprehensive pole and connection information.
     Structures data to match the required Excel output format.
     
     Args:
-        job_data (dict): The loaded Katapult JSON data
-        geojson_path (str): Optional path to a GeoJSON file with additional data
+        katapult_data (dict): The loaded Katapult JSON data
+        spidacalc_data (dict, optional): The loaded SPIDAcalc JSON data
+        geojson_path (str, optional): Path to a GeoJSON file with additional data
         
     Returns:
         pd.DataFrame: Processed data with all relevant connection and pole information
@@ -124,10 +143,10 @@ def process_data(job_data, geojson_path):
     # Track processed poles to avoid duplicates in operation numbering
     processed_poles = set()
     
-    if job_data and "connections" in job_data:
-        nodes_data = job_data.get("nodes", {})
+    if katapult_data and "connections" in katapult_data:
+        nodes_data = katapult_data.get("nodes", {})
         
-        for conn_id, conn_data in job_data.get("connections", {}).items():
+        for conn_id, conn_data in katapult_data.get("connections", {}).items():
             node_id_1 = conn_data.get('node_id_1')
             node_id_2 = conn_data.get('node_id_2')
             
@@ -161,17 +180,19 @@ def process_data(job_data, geojson_path):
             mr_status = extract_mr_status(node1_data)
             
             # Get lowest heights for communications and electrical
-            lowest_com, lowest_cps = get_lowest_heights_for_connection(job_data, conn_id)
+            # TODO: Update get_lowest_heights_for_connection to potentially use spidacalc_data
+            lowest_com, lowest_cps = get_lowest_heights_for_connection(katapult_data, conn_id)
             
             # Get pole-specific attributes for node1
             if node_id_1 not in processed_poles:
+                # TODO: These extraction functions might need to consider spidacalc_data
                 pole_owner = extract_pole_owner(node1_data)
                 pole_structure = extract_pole_structure(node1_data)
                 pla_percentage = extract_pla_percentage(node1_data)
                 construction_grade = extract_construction_grade(node1_data)
                 proposed_riser = extract_proposed_riser(node1_data)
-                proposed_guy = extract_proposed_guy(node_id_1, job_data)
-                attachment_action = determine_attachment_action(node1_data, job_data)
+                proposed_guy = extract_proposed_guy(node_id_1, katapult_data)
+                attachment_action = determine_attachment_action(node1_data, katapult_data)
                 
                 processed_poles.add(node_id_1)
             else:
@@ -185,13 +206,15 @@ def process_data(job_data, geojson_path):
                 attachment_action = ""
             
             # Get attacher data for node1
-            attachers_data = get_attachers_for_node(job_data, node_id_1)
+            # TODO: Update get_attachers_for_node to potentially use spidacalc_data
+            attachers_data = get_attachers_for_node(katapult_data, node_id_1)
             main_attachers = attachers_data.get('main_attachers', [])
             
             # Determine if this is an underground connection
             is_underground = connection_type.lower() == "underground cable"
             
             # Generate movement summary and remedy description
+            # TODO: Update movement/remedy functions if they need spidacalc_data
             movement_summary = get_movement_summary(main_attachers)
             remedy_description = generate_remedy_description(main_attachers, is_underground)
             
@@ -228,16 +251,17 @@ def process_data(job_data, geojson_path):
             }
             
             processed_records.append(record)
-            if node_id_1 not in processed_poles:
+            if node_id_1 not in processed_poles: # Check against processed_poles before incrementing
                 operation_counter += 1
 
     # Create DataFrame and ensure all columns exist
     if processed_records:
         df = pd.DataFrame(processed_records)
-        for col in columns:
+        # Ensure all expected columns are present, fill with None if missing
+        for col in columns: # Use the predefined columns list
             if col not in df.columns:
-                df[col] = None
-        # Order columns as defined
+                df[col] = None # Or pd.NA or suitable default
+        # Order columns as defined and fill NaN with empty string for Excel output
         return df[columns].fillna("")
     else:
         return pd.DataFrame(columns=columns)
@@ -248,7 +272,7 @@ if __name__ == '__main__':
     import os
     
     # Create a dummy Katapult JSON for testing
-    dummy_job_data = {
+    dummy_katapult_data = { # Renamed from dummy_job_data
         "job_name": "Test Job 123",
         "nodes": {
             "nodeA": {
@@ -304,21 +328,54 @@ if __name__ == '__main__':
     }
     
     # Create a dummy JSON file
-    dummy_json_path = "dummy_katapult_data.json"
-    with open(dummy_json_path, 'w') as f:
-        json.dump(dummy_job_data, f, indent=4)
+    dummy_katapult_json_path = "dummy_katapult_data.json" # Renamed
+    with open(dummy_katapult_json_path, 'w') as f:
+        json.dump(dummy_katapult_data, f, indent=4)
         
     output_excel = "dummy_output.xlsx"
     
-    print(f"Processing dummy file: {dummy_json_path}")
-    stats = process_katapult_json(dummy_json_path, output_excel)
-    print("\nProcessing Statistics:")
-    print(json.dumps(stats, indent=2))
+    # Test with only Katapult data
+    print(f"Processing dummy Katapult file: {dummy_katapult_json_path}")
+    stats_katapult_only = process_katapult_json(dummy_katapult_json_path, output_excel)
+    print("\nProcessing Statistics (Katapult Only):")
+    print(json.dumps(stats_katapult_only, indent=2))
     
-    # Clean up dummy file
-    if os.path.exists(dummy_json_path):
-        os.remove(dummy_json_path)
-    if os.path.exists(output_excel) and stats.get("status") == "success":
-        print(f"\nDummy Excel report generated: {output_excel}")
-    elif os.path.exists(output_excel): # remove if error
+    if os.path.exists(output_excel) and stats_katapult_only.get("status") == "success":
+        print(f"\nDummy Excel report generated (Katapult only): {output_excel}")
+        os.remove(output_excel) # Clean up before next test
+    elif os.path.exists(output_excel):
+         os.remove(output_excel)
+
+    # Create a dummy SPIDAcalc JSON for testing
+    dummy_spidacalc_data = {
+        "label": "Test SPIDA Project",
+        "leads": [{
+            "label": "Lead 1",
+            "locations": [{
+                "label": "Pole A", # Matches pole_tag from Katapult for potential matching
+                "designs": [{
+                    "label": "Measured Design",
+                    "structure": {"pole": {"clientItem": {"height": {"unit": "METRE", "value": 12.192}}}}
+                }]
+            }]
+        }]
+    }
+    dummy_spidacalc_json_path = "dummy_spidacalc_data.json"
+    with open(dummy_spidacalc_json_path, 'w') as f:
+        json.dump(dummy_spidacalc_data, f, indent=4)
+
+    # Test with both Katapult and SPIDAcalc data
+    print(f"\nProcessing dummy Katapult file ({dummy_katapult_json_path}) and SPIDAcalc file ({dummy_spidacalc_json_path})")
+    stats_with_spida = process_katapult_json(dummy_katapult_json_path, output_excel, dummy_spidacalc_json_path)
+    print("\nProcessing Statistics (Katapult & SPIDAcalc):")
+    print(json.dumps(stats_with_spida, indent=2))
+
+    # Clean up dummy files
+    if os.path.exists(dummy_katapult_json_path):
+        os.remove(dummy_katapult_json_path)
+    if os.path.exists(dummy_spidacalc_json_path):
+        os.remove(dummy_spidacalc_json_path)
+    if os.path.exists(output_excel) and stats_with_spida.get("status") == "success":
+        print(f"\nDummy Excel report generated (Katapult & SPIDAcalc): {output_excel}")
+    elif os.path.exists(output_excel): 
         os.remove(output_excel)

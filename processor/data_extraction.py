@@ -6,21 +6,43 @@ from .utils import get_nested_value
 from .height_utils import format_height_feet_inches
 
 def extract_pole_tag(node_data):
-    """Extract pole tag from node data"""
+    """Extract pole tag from node data, prioritizing documented fields."""
     if not node_data:
         return "N/A"
     
-    # Check multiple possible locations for pole tag
-    pole_tag = get_nested_value(node_data, ['attributes', 'pole_tag', '-Imported', 'tagtext'])
+    attributes = node_data.get('attributes', {})
+    if not attributes:
+        return "N/A"
+
+    # Priority 1: PoleNumber (assessment or -Imported)
+    pole_tag = get_nested_value(attributes, ['PoleNumber', 'assessment'])
     if not pole_tag:
-        pole_tag = get_nested_value(node_data, ['attributes', 'pole_tag', 'tagtext'])
+        pole_tag = get_nested_value(attributes, ['PoleNumber', '-Imported'])
+    
+    # Priority 2: PL_number (assessment or -Imported)
     if not pole_tag:
-        pole_tag = get_nested_value(node_data, ['attributes', 'PoleNumber', '-Imported'])
+        pole_tag = get_nested_value(attributes, ['PL_number', 'assessment'])
     if not pole_tag:
-        pole_tag = get_nested_value(node_data, ['attributes', 'PoleNumber', 'assessment'])
+        pole_tag = get_nested_value(attributes, ['PL_number', '-Imported'])
+
+    # Priority 3: electric_pole_tag (assessment or -Imported)
     if not pole_tag:
-        pole_tag = get_nested_value(node_data, ['attributes', 'PL_number', '-Imported'])
-        
+        pole_tag = get_nested_value(attributes, ['electric_pole_tag', 'assessment'])
+    if not pole_tag:
+        pole_tag = get_nested_value(attributes, ['electric_pole_tag', '-Imported'])
+
+    # Priority 4: DLOC_number (assessment or -Imported) - from work-flow.md
+    if not pole_tag:
+        pole_tag = get_nested_value(attributes, ['DLOC_number', 'assessment'])
+    if not pole_tag:
+        pole_tag = get_nested_value(attributes, ['DLOC_number', '-Imported'])
+
+    # Fallback to older 'pole_tag' attribute if others are not found
+    if not pole_tag:
+        pole_tag = get_nested_value(attributes, ['pole_tag', 'tagtext'])
+    if not pole_tag:
+         pole_tag = get_nested_value(attributes, ['pole_tag', '-Imported', 'tagtext']) # Less common variant
+
     return str(pole_tag) if pole_tag else "N/A"
 
 
@@ -31,7 +53,7 @@ def extract_scid(node_data):
     
     scid = get_nested_value(node_data, ['attributes', 'scid', '-Imported'])
     if not scid:
-        scid = get_nested_value(node_data, ['attributes', 'OP_number', '-Imported'])
+        scid = get_nested_value(node_data, ['attributes', 'OP_number', '-Imported']) # OP_number seems like a reasonable fallback
     
     return str(scid) if scid else "N/A"
 
@@ -41,23 +63,37 @@ def extract_location(node_data):
     if not node_data:
         return None, None
     
-    # First try to get coordinates from the main photo
+    # Priority 1: Direct latitude/longitude on the node object (as per Katapult JSON Guide Snippet A)
+    lat = node_data.get('latitude')
+    lon = node_data.get('longitude')
+    if lat is not None and lon is not None: # Check for not None, as 0 is a valid coordinate
+        return lat, lon
+
+    # Priority 2: Coordinates from the main photo associated with the node
     node_photos = node_data.get('photos', {})
     main_photo_id = next((pid for pid, pdata in node_photos.items() 
                          if pdata.get('association') == 'main'), None)
     
     if main_photo_id:
-        photo_data = get_nested_value(node_data, ['photos', main_photo_id], {})
-        lat = photo_data.get('latitude')
-        lon = photo_data.get('longitude')
-        if lat and lon:
+        # The photo entry itself under node_data.photos might contain lat/lon
+        photo_entry = node_photos.get(main_photo_id, {})
+        lat = photo_entry.get('latitude')
+        lon = photo_entry.get('longitude')
+        if lat is not None and lon is not None:
             return lat, lon
-    
-    # Fallback to node attributes if available
+        
+        # Fallback: Check top-level 'photos' or 'photo_summary' if node's photo entry doesn't have it
+        # This part is more complex as get_photofirst_data utility is for 'photofirst_data', not direct lat/lon
+        # For now, we assume if it's in a photo, it's in the photo_entry under the node.
+        # If Katapult JSONs store main photo lat/lon *only* in a top-level photos/photo_summary, this might need adjustment.
+
+    # Priority 3: Fallback to node attributes (less common for primary coordinates)
     lat = get_nested_value(node_data, ['attributes', 'latitude'])
     lon = get_nested_value(node_data, ['attributes', 'longitude'])
+    if lat is not None and lon is not None:
+        return lat, lon
     
-    return lat, lon
+    return None, None # Return None, None if not found
 
 
 def extract_span_length(conn_data):
@@ -65,15 +101,17 @@ def extract_span_length(conn_data):
     if not conn_data:
         return None
     
-    span_length = get_nested_value(conn_data, ['attributes', 'span_length', 'value'])
+    # Primary documented path for span length seems to be under attributes
+    span_length = get_nested_value(conn_data, ['attributes', 'span_length', 'value']) 
     if not span_length:
-        # Try alternate locations
+        # Alternative from observation
         span_length = get_nested_value(conn_data, ['attributes', 'length', 'value'])
-        if not span_length:
-            span_length = get_nested_value(conn_data, ['length'])
-    
+    if not span_length:
+        # Direct length if not in attributes (less common for structured data)
+        span_length = conn_data.get('length')
+
     try:
-        return float(span_length) if span_length else None
+        return float(span_length) if span_length is not None else None
     except (ValueError, TypeError):
         return None
 
@@ -83,18 +121,19 @@ def extract_connection_type(conn_data):
     if not conn_data:
         return ""
     
+    # Katapult JSON Guide Snippet F suggests 'button' or 'attributes.connection_type.button_added'
     conn_type = get_nested_value(conn_data, ['attributes', 'connection_type', 'button_added'])
-    if not conn_type and isinstance(get_nested_value(conn_data, ['attributes', 'connection_type']), dict):
-        # Try to get the first value if it's a dictionary with dynamic keys
-        conn_type_dict = get_nested_value(conn_data, ['attributes', 'connection_type'])
-        if conn_type_dict:
-            first_key = next(iter(conn_type_dict), None)
-            if first_key:
-                conn_type = conn_type_dict[first_key]
     
-    # Fallback to the connection button type
-    if not conn_type:
-        conn_type = get_nested_value(conn_data, ['button'])
+    if not conn_type: # If not found, try the direct 'button' attribute on the connection
+        conn_type = conn_data.get('button')
+
+    # Fallback for dynamic keys if 'button_added' wasn't present but 'connection_type' is a dict
+    if not conn_type and isinstance(get_nested_value(conn_data, ['attributes', 'connection_type']), dict):
+        conn_type_dict = get_nested_value(conn_data, ['attributes', 'connection_type'])
+        if conn_type_dict: # Get the first value from the dynamic keys
+            first_key = next(iter(conn_type_dict), None)
+            if first_key and isinstance(conn_type_dict[first_key], str): # Ensure it's a string value
+                conn_type = conn_type_dict[first_key]
     
     return str(conn_type) if conn_type else ""
 
@@ -103,20 +142,29 @@ def extract_mr_status(node_data):
     """Extract make-ready status from node data"""
     if not node_data:
         return ""
+    attributes = node_data.get('attributes', {})
     
-    # Check for make-ready status in different possible locations
-    mr_status = get_nested_value(node_data, ['attributes', 'mr_state', 'button_added'])
+    # Katapult JSON Guide Snippet B mentions 'mr_state.button_added'
+    mr_status = get_nested_value(attributes, ['mr_state', 'button_added'])
+    
+    # Fallback to observed 'kat_MR_state'
     if not mr_status:
-        mr_status = get_nested_value(node_data, ['attributes', 'kat_MR_state', 'button_added'])
+        mr_status = get_nested_value(attributes, ['kat_MR_state', 'button_added'])
+    
+    # Fallback to 'kat_work_type' if it indicates make_ready
     if not mr_status:
-        # Check for work type which might indicate MR status
-        work_type = get_nested_value(node_data, ['attributes', 'kat_work_type'])
-        if isinstance(work_type, dict):
-            first_key = next(iter(work_type), None)
-            if first_key:
-                work_type_val = work_type[first_key]
-                if 'make ready' in str(work_type_val).lower():
-                    mr_status = work_type_val
+        work_type_obj = attributes.get('kat_work_type', {})
+        if isinstance(work_type_obj, dict):
+            # It can be under 'button_added' or a dynamic key
+            work_type_val = work_type_obj.get('button_added')
+            if not work_type_val:
+                 # Try first value from dynamic keys
+                first_key = next(iter(work_type_obj), None)
+                if first_key:
+                    work_type_val = work_type_obj[first_key]
+
+            if work_type_val and 'make_ready' in str(work_type_val).lower(): # Changed 'make ready' to 'make_ready'
+                mr_status = work_type_val
     
     return str(mr_status) if mr_status else ""
 
@@ -125,113 +173,107 @@ def extract_pole_owner(node_data):
     """Extract pole owner from node data"""
     if not node_data:
         return ""
+    attributes = node_data.get('attributes', {})
+
+    # Katapult JSON Guide Snippet B: PoleOwner.assessment
+    owner = get_nested_value(attributes, ['PoleOwner', 'assessment'])
     
-    owner = get_nested_value(node_data, ['attributes', 'pole_owner', 'multi_added'])
+    # Fallback to observed 'pole_owner' with 'multi_added' or 'button_added'
     if not owner:
-        owner = get_nested_value(node_data, ['attributes', 'pole_owner', 'button_added'])
-    
-    # Handle if it's a list
-    if isinstance(owner, list) and owner:
-        owner = owner[0]
-    
+        owner_val = get_nested_value(attributes, ['pole_owner', 'multi_added'])
+        if not owner_val:
+            owner_val = get_nested_value(attributes, ['pole_owner', 'button_added'])
+        
+        if isinstance(owner_val, list) and owner_val:
+            owner = owner_val[0] # Take the first if it's a list
+        elif isinstance(owner_val, str):
+            owner = owner_val
+
     return str(owner) if owner else ""
 
 
 def extract_pole_structure(node_data):
     """
-    Extract comprehensive pole structure information with improved fallback logic.
-    
-    Args:
-        node_data (dict): Node data from Katapult JSON
-        
-    Returns:
-        str: Formatted pole structure string (e.g., "45-3 Southern Pine")
+    Extract comprehensive pole structure information (Height-Class Species).
+    Prioritizes documented paths from Katapult JSON Guide Snippet B.
     """
     if not node_data:
         return ""
     
-    attrs = get_nested_value(node_data, ['attributes'], {})
-    
-    # First try proposed_pole_spec if available
-    proposed_spec = None
-    proposed_spec_data = attrs.get("proposed_pole_spec", {})
-    if proposed_spec_data:
-        # Get the first non-empty value from the dynamic keys
-        for key, value in proposed_spec_data.items():
-            if isinstance(value, dict):
-                proposed_spec = value.get("value")  # If it's in a value field
-            else:
-                proposed_spec = value  # If it's direct
-            if proposed_spec and proposed_spec != "N/A":
-                break
-    
-    if proposed_spec:
-        return proposed_spec
-    
-    # Fall back to pole_height and pole_class
+    attrs = node_data.get('attributes', {})
+    if not attrs:
+        return ""
+
     height = None
-    height_data = attrs.get("pole_height", {}) or attrs.get("height", {})
-    if height_data:
-        if "one" in height_data:
-            height = height_data.get("one")
-        else:
-            # Try first non-empty value from dynamic keys
-            for key, value in height_data.items():
-                if value and value != "N/A":
-                    height = value
-                    break
-    
     pole_class = None
-    class_data = attrs.get("pole_class", {})
-    if class_data:
-        if "one" in class_data:
+    species = None
+
+    # Priority 1: Documented paths (PoleHeight.assessment, PoleClass.assessment, PoleSpecies.assessment)
+    height = get_nested_value(attrs, ['PoleHeight', 'assessment'])
+    pole_class = get_nested_value(attrs, ['PoleClass', 'assessment'])
+    species = get_nested_value(attrs, ['PoleSpecies', 'assessment'])
+
+    # Fallback: 'proposed_pole_spec' (if it contains the full string)
+    if not (height and pole_class and species): # If any primary part is missing, check proposed_spec
+        proposed_spec_val = None
+        proposed_spec_data = attrs.get("proposed_pole_spec", {})
+        if proposed_spec_data and isinstance(proposed_spec_data, dict):
+            # Iterate through dynamic keys if present
+            for key, value_obj in proposed_spec_data.items():
+                if isinstance(value_obj, dict):
+                    val = value_obj.get("value")
+                else: # Direct value
+                    val = value_obj
+                if val and val != "N/A":
+                    proposed_spec_val = val
+                    break # Take the first valid one
+        if proposed_spec_val:
+             # If proposed_spec_val seems to be a full "Height-Class Species" string, return it.
+             # This is a heuristic; might need refinement if format varies.
+            if isinstance(proposed_spec_val, str) and '-' in proposed_spec_val:
+                return proposed_spec_val
+
+
+    # Fallback: lowercase versions or 'one' key (observed in existing code)
+    if not height:
+        height_data = attrs.get("pole_height", {}) or attrs.get("height", {})
+        if isinstance(height_data, dict):
+            height = height_data.get("one")
+            if not height: # Try first dynamic key's value
+                height = next((str(v) for v in height_data.values() if v and v != "N/A"), None)
+    
+    if not pole_class:
+        class_data = attrs.get("pole_class", {})
+        if isinstance(class_data, dict):
             pole_class = class_data.get("one")
-        else:
-            # Try first non-empty value from dynamic keys
-            for key, value in class_data.items():
-                if value and value != "N/A":
-                    pole_class = value
-                    break
-    
-    species = ""
-    
-    # Check birthmark brand for more details
-    birthmark_brand = attrs.get('birthmark_brand', {})
-    if birthmark_brand and isinstance(birthmark_brand, dict):
-        # Get the first key for birthmark details
-        first_key = next(iter(birthmark_brand), None)
-        if first_key:
-            brand_details = birthmark_brand[first_key]
-            if not height: 
-                height = get_nested_value(brand_details, ['pole_height'])
-            if not pole_class: 
-                pole_class = get_nested_value(brand_details, ['pole_class'])
-            species_code = get_nested_value(brand_details, ['pole_species*'])
-            
-            # Map species code to full name
-            species_map = {"SPC": "Southern Pine", "WRC": "Western Red Cedar", 
-                           "DF": "Douglas Fir", "LP": "Lodgepole Pine"}
-            species = species_map.get(species_code, species_code if species_code else "")
-    
-    # Fallback for species
+            if not pole_class:
+                pole_class = next((str(v) for v in class_data.values() if v and v != "N/A"), None)
+
     if not species:
-        species_data = attrs.get('pole_species', {})
-        if species_data:
-            if "one" in species_data:
-                species = species_data.get("one")
-            else:
-                # Try first non-empty value from dynamic keys
-                for key, value in species_data.items():
-                    if value and value != "N/A":
-                        species = value
-                        break
+        species_data = attrs.get("pole_species", {})
+        if isinstance(species_data, dict):
+            species = species_data.get("one")
+            if not species:
+                species = next((str(v) for v in species_data.values() if v and v != "N/A"), None)
+
+    # Fallback: birthmark_brand for missing parts
+    if not height or not pole_class or not species:
+        birthmark_brand = attrs.get('birthmark_brand', {})
+        if birthmark_brand and isinstance(birthmark_brand, dict):
+            first_key = next(iter(birthmark_brand), None)
+            if first_key:
+                brand_details = birthmark_brand[first_key]
+                if not height: height = get_nested_value(brand_details, ['pole_height'])
+                if not pole_class: pole_class = get_nested_value(brand_details, ['pole_class'])
+                if not species:
+                    species_code = get_nested_value(brand_details, ['pole_species*']) # Note: '*' in key
+                    species_map = {"SPC": "Southern Pine", "WRC": "Western Red Cedar", 
+                                   "DF": "Douglas Fir", "LP": "Lodgepole Pine"}
+                    species = species_map.get(str(species_code), str(species_code) if species_code else "")
     
-    # Construct the structure string
     parts = []
-    if height: 
-        parts.append(str(height))
-    if pole_class: 
-        parts.append(str(pole_class))
+    if height: parts.append(str(height))
+    if pole_class: parts.append(str(pole_class))
     
     structure_str = "-".join(parts)
     if species:
@@ -241,81 +283,98 @@ def extract_pole_structure(node_data):
 
 
 def extract_pla_percentage(node_data):
-    """Extract PLA (Percent Loading Allowance) percentage from node data"""
+    """Extract PLA (Percent Loading Allowance) percentage from node data."""
     if not node_data:
         return ""
+    attrs = node_data.get('attributes', {})
+    if not attrs:
+        return ""
+
+    # Katapult JSON Guide Snippet B: 'final_passing_capacity_%' or 'existing_capacity_%'
+    # Both can have a dynamic key for the value.
     
-    # Try different possible paths for PLA data
-    pla_val = get_nested_value(node_data, ['attributes', 'final_passing_capacity_%'])
+    pla_value_str = None
     
-    if pla_val and isinstance(pla_val, dict): 
-        # It's an object with a dynamic key
-        val_key = next(iter(pla_val), None)
-        if val_key:
-            num_str = pla_val[val_key]
-            try:
-                return f"{float(num_str):.2f}%"
-            except (ValueError, TypeError):
-                pass
-    
-    # Try direct string value
-    if isinstance(pla_val, str):
+    # Try 'final_passing_capacity_%'
+    final_cap_data = attrs.get('final_passing_capacity_%')
+    if isinstance(final_cap_data, dict):
+        # Get value from dynamic key
+        pla_value_str = next((str(v) for v in final_cap_data.values()), None)
+    elif isinstance(final_cap_data, str): # Direct string value
+        pla_value_str = final_cap_data
+
+    # Try 'existing_capacity_%' if final not found or invalid
+    if not pla_value_str:
+        existing_cap_data = attrs.get('existing_capacity_%')
+        if isinstance(existing_cap_data, dict):
+            pla_value_str = next((str(v) for v in existing_cap_data.values()), None)
+        elif isinstance(existing_cap_data, str):
+            pla_value_str = existing_cap_data
+            
+    # Fallbacks from original code if primary paths fail
+    if not pla_value_str:
+        alternate_paths_keys = [
+            'final_passing_capacity_p', # Note: _p instead of _%
+            'passing_capacity_%',
+            'passing_capacity_p'
+        ]
+        for key in alternate_paths_keys:
+            alt_val_data = attrs.get(key)
+            if isinstance(alt_val_data, dict):
+                pla_value_str = next((str(v) for v in alt_val_data.values()), None)
+            elif isinstance(alt_val_data, str):
+                pla_value_str = alt_val_data
+            if pla_value_str:
+                break
+                
+    if pla_value_str:
         try:
-            return f"{float(pla_val):.2f}%"
+            return f"{float(pla_value_str):.2f}%"
         except (ValueError, TypeError):
-            pass
-    
-    # Try alternate paths
-    alternate_paths = [
-        ['attributes', 'final_passing_capacity_p'],
-        ['attributes', 'passing_capacity_%'],
-        ['attributes', 'passing_capacity_p']
-    ]
-    
-    for path in alternate_paths:
-        alt_val = get_nested_value(node_data, path)
-        if alt_val:
-            if isinstance(alt_val, dict):
-                val_key = next(iter(alt_val), None)
-                if val_key:
-                    try:
-                        return f"{float(alt_val[val_key]):.2f}%"
-                    except (ValueError, TypeError):
-                        continue
-            elif isinstance(alt_val, str):
-                try:
-                    return f"{float(alt_val):.2f}%"
-                except (ValueError, TypeError):
-                    continue
-    
+            pass # Failed to convert, will return ""
+            
     return ""
 
 
 def extract_construction_grade(node_data):
-    """Extract construction grade from node data"""
+    """Extract construction grade from node data."""
     if not node_data:
         return ""
+    attrs = node_data.get('attributes', {})
+    if not attrs:
+        return ""
+
+    # Katapult JSON Guide Snippet B: 'construction_grade_analysis.assessment'
+    grade = get_nested_value(attrs, ['construction_grade_analysis', 'assessment'])
+    if grade:
+        return str(grade)
+
+    # Fallback: Infer from pole_class (as in original code)
+    # For pole_class, use the logic from extract_pole_structure or a simplified version
+    pole_class_val = get_nested_value(attrs, ['PoleClass', 'assessment'])
+    if not pole_class_val: # Try lowercase fallback
+        class_data = attrs.get("pole_class", {})
+        if isinstance(class_data, dict):
+            pole_class_val = class_data.get("one")
+            if not pole_class_val:
+                pole_class_val = next((str(v) for v in class_data.values() if v and v != "N/A"), None)
     
-    # Get pole class to map to grade
-    pole_class = get_nested_value(node_data, ['attributes', 'pole_class', 'one'])
-    
-    # Fallback to birthmark data
-    if not pole_class:
-        birthmark_brand = get_nested_value(node_data, ['attributes', 'birthmark_brand'])
+    if not pole_class_val: # Try birthmark
+        birthmark_brand = attrs.get('birthmark_brand', {})
         if birthmark_brand and isinstance(birthmark_brand, dict):
             first_key = next(iter(birthmark_brand), None)
             if first_key:
                 brand_details = birthmark_brand[first_key]
-                pole_class = get_nested_value(brand_details, ['pole_class'])
-    
-    if pole_class:
-        # Standard mapping from pole class to construction grade
+                pole_class_val = get_nested_value(brand_details, ['pole_class'])
+
+    if pole_class_val:
         class_to_grade_map = {
             "1": "B", "2": "C", "3": "C", "4": "D", "5": "D/E",
             "H1": "B", "H2": "C", "H3": "C", "H4": "D", "H5": "D/E"
         }
-        return class_to_grade_map.get(str(pole_class), "")
-    
+        # Ensure pole_class_val is a string for map lookup
+        return class_to_grade_map.get(str(pole_class_val), "")
+        
     return ""
 
 
@@ -323,21 +382,23 @@ def extract_proposed_riser(node_data):
     """Extract proposed riser information from node data"""
     if not node_data:
         return "NO"
+    attrs = node_data.get('attributes', {})
     
-    # Check for riser attribute
-    riser_val = get_nested_value(node_data, ['attributes', 'riser', 'button_added'])
+    # Check for riser attribute (e.g., a button_added field)
+    riser_val = get_nested_value(attrs, ['riser', 'button_added'])
     
-    # If riser attribute exists and is not explicitly "No", assume YES
-    if riser_val and str(riser_val).lower() != 'no':
-        return "YES (1)"
+    # If riser attribute exists and is not explicitly "No" or empty, assume YES
+    if riser_val and str(riser_val).lower() not in ['no', 'none', '']:
+        return "YES (1)" # Assuming 1 if present, count might need more logic if available
     
-    # Check for riser in MR notes
-    mr_notes = get_nested_value(node_data, ['attributes', 'kat_MR_notes'])
-    if mr_notes and isinstance(mr_notes, dict):
-        for note_val in mr_notes.values():
-            note_text = str(note_val).lower()
+    # Check for riser in MR notes (kat_MR_notes)
+    # This is heuristic and depends on note content.
+    mr_notes_data = attrs.get('kat_MR_notes')
+    if mr_notes_data and isinstance(mr_notes_data, dict):
+        for note_key, note_content in mr_notes_data.items():
+            note_text = str(note_content).lower()
             if "riser" in note_text and any(term in note_text for term in ["install", "add", "new", "proposed"]):
-                return "YES (1)"
+                return "YES (1)" # Assuming 1 if mentioned as new/proposed
     
     return "NO"
 

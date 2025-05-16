@@ -1,18 +1,20 @@
 """
 Functions for processing node-related data from Katapult JSON.
 """
-
+import math # Added import
 from .height_utils import format_height_feet_inches
 from .utils import calculate_bearing
+from .photo_data_utils import get_photofirst_data # Added import
 
 def get_neutral_wire_height(job_data, node_id):
     """Find the height of the neutral wire for a given node"""
-    node_photos = job_data.get("nodes", {}).get(node_id, {}).get("photos", {})
-    main_photo_id = next((pid for pid, pdata in node_photos.items() if pdata.get("association") == "main"), None)
+    node_data = job_data.get("nodes", {}).get(node_id, {})
+    node_photos_dict = node_data.get("photos", {})
+    main_photo_id = next((pid for pid, p_entry in node_photos_dict.items() if p_entry.get("association") == "main"), None)
     
     if main_photo_id:
-        photo_data = job_data.get("photos", {}).get(main_photo_id, {})
-        photofirst_data = photo_data.get("photofirst_data", {})
+        main_photo_entry = node_photos_dict.get(main_photo_id, {})
+        photofirst_data = get_photofirst_data(main_photo_id, main_photo_entry, job_data)
         trace_data = job_data.get("traces", {}).get("trace_data", {})
         
         for wire_key, wire in photofirst_data.get("wire", {}).items():
@@ -32,16 +34,17 @@ def get_neutral_wire_height(job_data, node_id):
     return None
 
 
-def get_attachers_from_node_trace(job_data, node_id):
+def get_attachers_from_node_trace(job_data, node_id): # This function seems more about trace logic than direct photo access pattern change
     """Extract attachers from node trace data"""
     attachers = {}
-    node_info = job_data.get("nodes", {}).get(node_id, {})
-    photo_ids = node_info.get("photos", {})
-    main_photo_id = next((pid for pid, pdata in photo_ids.items() if pdata.get("association") == "main"), None)
+    node_data = job_data.get("nodes", {}).get(node_id, {}) # Renamed node_info to node_data
+    node_photos_dict = node_data.get("photos", {}) # Renamed photo_ids
+    main_photo_id = next((pid for pid, p_entry in node_photos_dict.items() if p_entry.get("association") == "main"), None)
     if not main_photo_id:
         return {}
-    photo_data = job_data.get("photos", {}).get(main_photo_id, {})
-    photofirst_data = photo_data.get("photofirst_data", {})
+    
+    main_photo_entry = node_photos_dict.get(main_photo_id, {})
+    photofirst_data = get_photofirst_data(main_photo_id, main_photo_entry, job_data)
     trace_data = job_data.get("traces", {}).get("trace_data", {})
     
     # First pass: collect all power wires to find the lowest one
@@ -96,11 +99,15 @@ def get_attachers_from_node_trace(job_data, node_id):
 def get_heights_for_node_trace_attachers(job_data, node_id, attacher_trace_map):
     """Get attachment heights for a specific node's attachers"""
     heights = {}
-    photo_ids = job_data.get("nodes", {}).get(node_id, {}).get("photos", {})
-    main_photo_id = next((pid for pid, pdata in photo_ids.items() if pdata.get("association") == "main"), None)
+    node_data = job_data.get("nodes", {}).get(node_id, {})
+    node_photos_dict = node_data.get("photos", {})
+    main_photo_id = next((pid for pid, p_entry in node_photos_dict.items() if p_entry.get("association") == "main"), None)
     if not main_photo_id:
         return heights
-    photofirst_data = job_data.get("photos", {}).get(main_photo_id, {}).get("photofirst_data", {})
+    
+    main_photo_entry = node_photos_dict.get(main_photo_id, {})
+    photofirst_data = get_photofirst_data(main_photo_id, main_photo_entry, job_data)
+    
     all_sections = {**photofirst_data.get("wire", {}), **photofirst_data.get("equipment", {}), **photofirst_data.get("guying", {})}
     for attacher_name, trace_id in attacher_trace_map.items():
         for item_key, item in all_sections.items():
@@ -126,12 +133,13 @@ def get_attachers_for_node(job_data, node_id):
     """Get all attachers for a node including guying and drip loops"""
     main_attacher_data = []
     neutral_height = get_neutral_wire_height(job_data, node_id)
-    node_photos = job_data.get("nodes", {}).get(node_id, {}).get("photos", {})
-    main_photo_id = next((pid for pid, pdata in node_photos.items() if pdata.get("association") == "main"), None)
+    node_data = job_data.get("nodes", {}).get(node_id, {})
+    node_photos_dict = node_data.get("photos", {})
+    main_photo_id = next((pid for pid, p_entry in node_photos_dict.items() if p_entry.get("association") == "main"), None)
     
     if main_photo_id:
-        photo_data = job_data.get("photos", {}).get(main_photo_id, {})
-        photofirst_data = photo_data.get("photofirst_data", {})
+        main_photo_entry = node_photos_dict.get(main_photo_id, {})
+        photofirst_data = get_photofirst_data(main_photo_id, main_photo_entry, job_data)
         trace_data = job_data.get("traces", {}).get("trace_data", {})
         
         for wire_key, wire in photofirst_data.get("wire", {}).items():
@@ -253,28 +261,32 @@ def get_reference_attachers(job_data, node_id):
             if sections:
                 section_ids = list(sections.keys())
                 mid_section_id = section_ids[len(section_ids) // 2]
-                mid_section = sections[mid_section_id]
-                lat, lon = mid_section.get("latitude"), mid_section.get("longitude")
+                mid_section_entry = sections[mid_section_id] # Renamed mid_section to mid_section_entry
+                lat, lon = mid_section_entry.get("latitude"), mid_section_entry.get("longitude")
                 
                 if lat and lon:
-                    from_node = job_data.get("nodes", {}).get(node_id, {})
-                    from_photos = from_node.get("photos", {})
-                    if from_photos:
-                        main_photo_id_from = next((pid for pid, pdata in from_photos.items() if pdata.get("association") == "main"), None)
+                    from_node_data = job_data.get("nodes", {}).get(node_id, {}) # Renamed from_node
+                    from_node_photos_dict = from_node_data.get("photos", {}) # Renamed from_photos
+                    if from_node_photos_dict:
+                        main_photo_id_from = next((pid for pid, p_entry in from_node_photos_dict.items() if p_entry.get("association") == "main"), None)
                         if main_photo_id_from:
-                            photo_data_from = job_data.get("photos", {}).get(main_photo_id_from, {})
+                            # This photo_data_from is for bearing calculation, not photofirst_data directly
+                            photo_data_from = job_data.get("photos", {}).get(main_photo_id_from, {}) # Keep old lookup for lat/lon if it's there
+                            if not photo_data_from: # Fallback if not in top-level photos
+                                photo_data_from = from_node_photos_dict.get(main_photo_id_from, {})
+
                             if photo_data_from and "latitude" in photo_data_from and "longitude" in photo_data_from:
                                 from_lat, from_lon = photo_data_from["latitude"], photo_data_from["longitude"]
                                 degrees, cardinal = calculate_bearing(from_lat, from_lon, lat, lon)
                                 bearing_str = f"{cardinal} ({int(degrees)}°)"
                 
-                photos_mid = mid_section.get("photos", {})
-                main_photo_id_mid = next((pid for pid, pdata in photos_mid.items() if pdata.get("association") == "main"), None)
+                section_photos_dict = mid_section_entry.get("photos", {}) # Renamed photos_mid
+                main_photo_id_mid = next((pid for pid, p_entry in section_photos_dict.items() if p_entry.get("association") == "main"), None)
                 if main_photo_id_mid:
-                    photo_data_mid = job_data.get("photos", {}).get(main_photo_id_mid, {})
-                    if not photo_data_mid: continue
-                    photofirst_data_mid = photo_data_mid.get("photofirst_data", {})
-                    if not photofirst_data_mid: continue
+                    main_photo_entry_mid = section_photos_dict.get(main_photo_id_mid, {})
+                    photofirst_data_mid = get_photofirst_data(main_photo_id_mid, main_photo_entry_mid, job_data)
+                    
+                    if not photofirst_data_mid: continue # Skip if no photofirst_data
                     
                     span_data = []
                     trace_data = job_data.get("traces", {}).get("trace_data", {})
@@ -355,18 +367,21 @@ def get_backspan_attachers(job_data, node_id):
     neutral_height = get_neutral_wire_height(job_data, node_id)
     
     # Determine what connections could be considered "backspan"
-    # Generally we look for overhead connections from this pole to another pole
-    # and consider the direction with most connections or a specific designation
-    node_photos = job_data.get("nodes", {}).get(node_id, {}).get("photos", {})
+    node_data = job_data.get("nodes", {}).get(node_id, {}) # Get node_data once
+    node_photos_dict = node_data.get("photos", {})
     node_lat, node_lon = None, None
     
     # Get node location
-    main_photo_id = next((pid for pid, pdata in node_photos.items() 
-                         if pdata.get("association") == "main"), None)
-    if main_photo_id:
-        photo_data = job_data.get("photos", {}).get(main_photo_id, {})
-        if photo_data:
-            node_lat, node_lon = photo_data.get("latitude"), photo_data.get("longitude")
+    main_photo_id_node = next((pid for pid, p_entry in node_photos_dict.items() 
+                         if p_entry.get("association") == "main"), None)
+    if main_photo_id_node:
+        # This photo_data is for node's lat/lon, not photofirst_data directly
+        photo_data_node = job_data.get("photos", {}).get(main_photo_id_node, {}) # Keep old lookup for lat/lon
+        if not photo_data_node: # Fallback if not in top-level photos
+            photo_data_node = node_photos_dict.get(main_photo_id_node, {})
+
+        if photo_data_node:
+            node_lat, node_lon = photo_data_node.get("latitude"), photo_data_node.get("longitude")
     
     if not node_lat or not node_lon:
         return backspan_data, bearing_str
@@ -410,8 +425,8 @@ def get_backspan_attachers(job_data, node_id):
             section_ids = list(sections.keys())
             # Use the middle section for most accurate midpoint
             mid_section_id = section_ids[len(section_ids) // 2]
-            mid_section = sections[mid_section_id]
-            mid_lat, mid_lon = mid_section.get("latitude"), mid_section.get("longitude")
+            mid_section_entry = sections[mid_section_id] # Renamed mid_section
+            mid_lat, mid_lon = mid_section_entry.get("latitude"), mid_section_entry.get("longitude")
             
         if mid_lat and mid_lon:
             # Calculate bearing from our node to the midpoint
@@ -436,50 +451,39 @@ def get_backspan_attachers(job_data, node_id):
     # First try to find a connection explicitly marked as backspan
     marked_backspans = [bs for bs in potential_backspans if bs['is_backspan_marked']]
     if marked_backspans:
-        chosen_backspan = marked_backspans[0]
+        chosen_backspan = marked_backspans[0] # TODO: Could be multiple, pick one? For now, first.
     elif potential_backspans:
-        # If no marked backspan, find the one that's most in the opposite direction
-        # from the majority of connections - this is typically the backspan
-        
-        # Calculate the average bearing of all connections
         all_bearings = [bs['bearing'] for bs in potential_backspans]
-        if not all_bearings:
+        if not all_bearings: # Should not happen if potential_backspans is not empty
             return backspan_data, bearing_str
             
-        # Calculate the average bearing (considering the circular nature of bearings)
         avg_sin = sum(math.sin(math.radians(b)) for b in all_bearings) / len(all_bearings)
         avg_cos = sum(math.cos(math.radians(b)) for b in all_bearings) / len(all_bearings)
         avg_bearing = (math.degrees(math.atan2(avg_sin, avg_cos)) + 360) % 360
         
-        # Find the connection most opposite to the average bearing (about 180 degrees difference)
-        # This is likely the backspan
         chosen_backspan = min(potential_backspans, 
                               key=lambda bs: abs(((bs['bearing'] - avg_bearing + 180) % 360) - 180))
     
     # If we found a backspan, extract the attachment data
     if chosen_backspan:
-        # Set the bearing string
         bearing_str = f"{chosen_backspan['cardinal']} ({int(chosen_backspan['bearing'])}°)"
         
-        # Get the midpoint section data
         conn_data = job_data.get("connections", {}).get(chosen_backspan['conn_id'], {})
         sections = conn_data.get("sections", {})
         mid_section_id = chosen_backspan['mid_section_id']
         
         if sections and mid_section_id and mid_section_id in sections:
-            mid_section = sections[mid_section_id]
-            photos = mid_section.get("photos", {})
-            main_photo_id = next((pid for pid, pdata in photos.items() 
-                                 if pdata.get("association") == "main"), None)
+            mid_section_entry = sections[mid_section_id] # Renamed mid_section
+            section_photos_dict = mid_section_entry.get("photos", {}) # Renamed photos
+            main_photo_id_mid = next((pid for pid, p_entry in section_photos_dict.items() 
+                                 if p_entry.get("association") == "main"), None)
             
-            if main_photo_id:
-                photo_data = job_data.get("photos", {}).get(main_photo_id, {})
-                if not photo_data: 
-                    return backspan_data, bearing_str
-                    
-                photofirst_data = photo_data.get("photofirst_data", {})
+            if main_photo_id_mid:
+                main_photo_entry_mid = section_photos_dict.get(main_photo_id_mid, {})
+                photofirst_data = get_photofirst_data(main_photo_id_mid, main_photo_entry_mid, job_data)
+                
                 if not photofirst_data: 
-                    return backspan_data, bearing_str
+                    return backspan_data, bearing_str # No photofirst_data to process
                 
                 trace_data = job_data.get("traces", {}).get("trace_data", {})
                 
@@ -509,8 +513,8 @@ def get_backspan_attachers(job_data, node_id):
                             proposed_height = ""
                             
                             # Calculate total movement from MR moves and effective moves
-                            total_move = float(mr_move) if mr_move else 0.0
-                            if effective_moves:
+                            total_move = float(mr_move) if mr_move else 0.0 # Ensure mr_move is float
+                            if effective_moves: # Ensure effective_moves is not None
                                 for move_val in effective_moves.values():
                                     try:
                                         total_move += float(move_val)
@@ -555,8 +559,8 @@ def get_backspan_attachers(job_data, node_id):
                                 proposed_height = ""
                                 
                                 # Calculate total movement
-                                total_move = float(mr_move) if mr_move else 0.0
-                                if effective_moves:
+                                total_move = float(mr_move) if mr_move else 0.0 # Ensure mr_move is float
+                                if effective_moves: # Ensure effective_moves is not None
                                     for move_val in effective_moves.values():
                                         try:
                                             total_move += float(move_val)
