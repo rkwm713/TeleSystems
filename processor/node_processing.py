@@ -1,10 +1,14 @@
 """
 Functions for processing node-related data from Katapult JSON.
 """
-import math # Added import
+import math
+import logging
 from .height_utils import format_height_feet_inches
 from .utils import calculate_bearing
-from .photo_data_utils import get_photofirst_data # Added import
+from .photo_data_utils import get_photofirst_data, get_utility_company_names
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 def get_neutral_wire_height(job_data, node_id):
     """Find the height of the neutral wire for a given node"""
@@ -12,10 +16,14 @@ def get_neutral_wire_height(job_data, node_id):
     node_photos_dict = node_data.get("photos", {})
     main_photo_id = next((pid for pid, p_entry in node_photos_dict.items() if p_entry.get("association") == "main"), None)
     
+    utility_company_names = get_utility_company_names()
+    
     if main_photo_id:
         main_photo_entry = node_photos_dict.get(main_photo_id, {})
         photofirst_data = get_photofirst_data(main_photo_id, main_photo_entry, job_data)
         trace_data = job_data.get("traces", {}).get("trace_data", {})
+        
+        neutral_heights = []
         
         for wire_key, wire in photofirst_data.get("wire", {}).items():
             trace_id = wire.get("_trace")
@@ -24,13 +32,35 @@ def get_neutral_wire_height(job_data, node_id):
                 company = trace_info.get("company", "").strip()
                 cable_type = trace_info.get("cable_type", "").strip()
                 
-                if company.lower() == "cps energy" and cable_type.lower() == "neutral":
+                # Use flexible matching for utility company and neutral wire
+                is_utility = any(company.upper() == util_name.upper() for util_name in utility_company_names)
+                is_neutral = cable_type.upper() == "NEUTRAL"
+                
+                if is_utility and is_neutral:
                     measured_height = wire.get("_measured_height")
                     if measured_height is not None:
                         try:
-                            return float(measured_height)
-                        except (ValueError, TypeError):
+                            if isinstance(measured_height, str):
+                                measured_height = float(measured_height)
+                            neutral_height = float(measured_height)
+                            neutral_heights.append(neutral_height)
+                            logger.debug(f"Found neutral wire for company '{company}' at height {neutral_height}")
+                        except (ValueError, TypeError) as e:
+                            logger.debug(f"Error parsing neutral wire height: {str(e)}")
                             continue
+    
+        # Return the lowest neutral height if any found
+        if neutral_heights:
+            lowest_neutral = min(neutral_heights)
+            logger.debug(f"Node {node_id}: Using lowest neutral height: {lowest_neutral}")
+            return lowest_neutral
+        else:
+            logger.debug(f"Node {node_id}: No neutral wires found")
+    
+    # Look for a default neutral height value or predict one
+    # Try to find any CPS wire and estimate where neutral would be
+    # For now, return None to indicate no neutral wire found
+    logger.debug(f"Node {node_id}: Could not find neutral wire height")
     return None
 
 
@@ -139,9 +169,11 @@ def get_attachers_for_node(job_data, node_id):
     
     if main_photo_id:
         main_photo_entry = node_photos_dict.get(main_photo_id, {})
+        # Use enhanced photofirst_data extraction
         photofirst_data = get_photofirst_data(main_photo_id, main_photo_entry, job_data)
         trace_data = job_data.get("traces", {}).get("trace_data", {})
         
+        # Process wire attachments
         for wire_key, wire in photofirst_data.get("wire", {}).items():
             trace_id = wire.get("_trace")
             if trace_id and trace_id in trace_data:
@@ -149,7 +181,8 @@ def get_attachers_for_node(job_data, node_id):
                 company = trace_info.get("company", "").strip()
                 cable_type = trace_info.get("cable_type", "").strip()
                 
-                if cable_type.lower() == "primary":
+                # Skip primary wires
+                if cable_type.upper() == "PRIMARY":
                     continue
                     
                 measured_height = wire.get("_measured_height")
@@ -163,18 +196,27 @@ def get_attachers_for_node(job_data, node_id):
                     
                     if measured_height is not None:
                         try:
+                            if isinstance(measured_height, str):
+                                measured_height = float(measured_height)
                             measured_height_float = float(measured_height)
                             raw_height = measured_height_float
                             existing_height = format_height_feet_inches(measured_height_float)
+                            logger.debug(f"Node {node_id}: Found wire attacher '{attacher_name}' with height {existing_height}")
                             
+                            # Process any make-ready moves
                             if mr_move is not None:
                                 try:
+                                    if isinstance(mr_move, str):
+                                        mr_move = float(mr_move)
                                     mr_move_float = float(mr_move)
                                     proposed_height_value = measured_height_float + mr_move_float
                                     proposed_height = format_height_feet_inches(proposed_height_value)
-                                except (ValueError, TypeError):
+                                    logger.debug(f"Node {node_id}: Attacher '{attacher_name}' has move {mr_move_float}, proposed height {proposed_height}")
+                                except (ValueError, TypeError) as e:
+                                    logger.debug(f"Node {node_id}: Error processing mr_move for '{attacher_name}': {str(e)}")
                                     proposed_height = "" # Keep existing if mr_move is invalid
-                        except (ValueError, TypeError):
+                        except (ValueError, TypeError) as e:
+                            logger.debug(f"Node {node_id}: Error processing measured_height for '{attacher_name}': {str(e)}")
                             existing_height = ""
                             proposed_height = ""
                             raw_height = 0.0 # Default to 0 if parsing fails
@@ -187,6 +229,7 @@ def get_attachers_for_node(job_data, node_id):
                         'is_proposed': trace_info.get("proposed", False)
                     })
         
+        # Process guy wires
         for guy_key, guy in photofirst_data.get("guying", {}).items():
             trace_id = guy.get("_trace")
             if trace_id and trace_id in trace_data:
@@ -201,11 +244,15 @@ def get_attachers_for_node(job_data, node_id):
                     raw_height_guy = None
                     if measured_height is not None and neutral_height is not None:
                         try:
+                            if isinstance(measured_height, str):
+                                measured_height = float(measured_height)
                             guy_height_float = float(measured_height)
                             raw_height_guy = guy_height_float
                             if guy_height_float < neutral_height:
                                 is_down_guy = True
-                        except (ValueError, TypeError):
+                                logger.debug(f"Node {node_id}: Found down guy for '{company} {cable_type}' at height {guy_height_float}")
+                        except (ValueError, TypeError) as e:
+                            logger.debug(f"Node {node_id}: Error processing guy measured_height: {str(e)}")
                             pass # Keep is_down_guy as False
                     
                     if is_down_guy:
@@ -217,10 +264,14 @@ def get_attachers_for_node(job_data, node_id):
                             existing_height = format_height_feet_inches(raw_height_guy)
                             if mr_move is not None:
                                 try:
+                                    if isinstance(mr_move, str):
+                                        mr_move = float(mr_move)
                                     mr_move_float = float(mr_move)
                                     proposed_height_value = raw_height_guy + mr_move_float
                                     proposed_height = format_height_feet_inches(proposed_height_value)
-                                except (ValueError, TypeError):
+                                    logger.debug(f"Node {node_id}: Down guy '{attacher_name}' has move {mr_move_float}, proposed height {proposed_height}")
+                                except (ValueError, TypeError) as e:
+                                    logger.debug(f"Node {node_id}: Error processing guy mr_move: {str(e)}")
                                     proposed_height = ""
                         
                         main_attacher_data.append({
@@ -231,7 +282,13 @@ def get_attachers_for_node(job_data, node_id):
                             'is_proposed': trace_info.get("proposed", False)
                         })
     
+    # Sort attachers by height (highest to lowest)
     main_attacher_data.sort(key=lambda x: x['raw_height'], reverse=True)
+    
+    if not main_attacher_data:
+        logger.debug(f"Node {node_id}: No attachers found")
+    
+    # Get reference and backspan data
     reference_spans = get_reference_attachers(job_data, node_id)
     backspan_data, backspan_bearing = get_backspan_attachers(job_data, node_id)
     
