@@ -1,0 +1,30 @@
+# Byte-compiled / optimized / DLL files
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+
+# Virtual environment
+venv/
+env/
+.venv/
+ENV/
+
+# Distribution / packaging
+*.egg-info/
+dist/
+build/
+*.egg
+
+# IDE / Editor specific
+.vscode/
+.idea/
+
+# Secrets
+.env
+
+# Project-specific
+uploads/
+dummy_output.xlsx
+static/test-data/
+final_code_output.py
