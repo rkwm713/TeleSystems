@@ -1,30 +1,54 @@
-# Byte-compiled / optimized / DLL files
-*.pyc
-*.pyo
-*.pyd
+# Python
 __pycache__/
-
-# Virtual environment
-venv/
+*.py[cod]
+*$py.class
+*.so
+.Python
 env/
-.venv/
+venv/
 ENV/
-
-# Distribution / packaging
-*.egg-info/
-dist/
 build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
 *.egg
 
-# IDE / Editor specific
-.vscode/
-.idea/
-
-# Secrets
+# Heroku
 .env
+.env.local
+.env.development
+.env.test
+.env.production
 
-# Project-specific
-uploads/
-dummy_output.xlsx
-static/test-data/
-final_code_output.py
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS specific
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Application specific
+uploads/*
+!uploads/.gitkeep
+*.xlsx
+*.log
+*.sqlite
+*.db

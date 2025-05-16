@@ -5,9 +5,15 @@ import tempfile
 import traceback
 import logging
 import json
+import io
 from werkzeug.utils import secure_filename
 from processor import process_katapult_json
+from processor import storage
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Load environment variables from .env file if present
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(
@@ -27,7 +33,7 @@ if not os.path.exists(uploads_dir):
 
 # Application setup
 app = Flask(__name__)
-app.secret_key = os.urandom(24)
+app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24))
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max upload size
 app.config['UPLOAD_FOLDER'] = uploads_dir
 app.config['ALLOWED_EXTENSIONS'] = {'json'}
@@ -102,17 +108,21 @@ def upload_file():
         excel_filename = f"make_ready_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
         excel_path = os.path.join(app.config['UPLOAD_FOLDER'], excel_filename)
         
-        # Save the uploaded file
-        file.save(json_path)
+        # Save the uploaded file using storage utility
+        json_path = storage.save_file(json_path, file)
         logger.info(f'Successfully saved uploaded file: {json_path}')
         
         # Validate JSON file
         try:
-            with open(json_path, 'r', encoding='utf-8') as f:
-                json_data = json.load(f)
-                # Verify this is a Katapult file by checking for key structures
-                if not all(key in json_data for key in ['nodes', 'connections']):
-                    raise ValueError("This does not appear to be a valid Katapult JSON file. Required keys not found.")
+            # Get file content from storage
+            json_content = storage.get_file(json_path)
+            if isinstance(json_content, bytes):
+                json_content = json_content.decode('utf-8')
+            
+            json_data = json.loads(json_content)
+            # Verify this is a Katapult file by checking for key structures
+            if not all(key in json_data for key in ['nodes', 'connections']):
+                raise ValueError("This does not appear to be a valid Katapult JSON file. Required keys not found.")
         except json.JSONDecodeError:
             flash('The uploaded file is not valid JSON.', 'danger')
             logger.error(f'Invalid JSON format: {json_path}')
@@ -139,8 +149,8 @@ def upload_file():
             return redirect(url_for('index'))
         
         # Clean up the uploaded JSON file if configured to do so
-        if app.config['DELETE_UPLOADED_JSON'] and os.path.exists(json_path):
-            os.remove(json_path)
+        if app.config['DELETE_UPLOADED_JSON']:
+            storage.delete_file(json_path)
             logger.info(f'Removed JSON file: {json_path}')
         
         # Return results page with download link
@@ -162,21 +172,38 @@ def download_file(filename):
     """Handle file download"""
     file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     
-    # Validate the file exists
-    if not os.path.exists(file_path):
-        logger.error(f'Download attempted for non-existent file: {file_path}')
-        abort(404, description="File not found")
-    
     # Validate that it's an Excel file (for security)
     if not filename.endswith('.xlsx'):
-        logger.error(f'Download attempted for non-Excel file: {file_path}')
+        logger.error(f'Download attempted for non-Excel file: {filename}')
         abort(403, description="Only Excel files can be downloaded")
     
-    logger.info(f'Serving download: {file_path}')
+    logger.info(f'Serving download: {filename}')
     try:
-        return send_file(file_path,
-                        as_attachment=True,
-                        download_name=filename)
+        # For S3 storage, check if the file exists by trying to get metadata
+        if os.environ.get('USE_S3', 'False').lower() == 'true':
+            s3_path = f"s3://{os.environ.get('S3_BUCKET_NAME')}/{filename}"
+            file_content = storage.get_file(s3_path)
+            
+            # Create a BytesIO object from the file content
+            file_stream = io.BytesIO(file_content)
+            
+            return send_file(
+                file_stream,
+                as_attachment=True,
+                download_name=filename,
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+        else:
+            # Local storage - check if file exists
+            if not os.path.exists(file_path):
+                logger.error(f'Download attempted for non-existent file: {file_path}')
+                abort(404, description="File not found")
+                
+            return send_file(
+                file_path,
+                as_attachment=True,
+                download_name=filename
+            )
     except Exception as e:
         logger.error(f'Error serving file: {str(e)}')
         abort(500, description="Error serving file")
@@ -195,4 +222,5 @@ def internal_error(error):
                            error_message="Internal server error"), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(debug=False, host='0.0.0.0', port=port)
