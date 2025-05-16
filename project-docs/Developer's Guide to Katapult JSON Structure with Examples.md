@@ -36,7 +36,9 @@ A Katapult JSON file typically represents a collection of field data and associa
   }
   // ... other top-level keys like 'job_creator', 'job_description', 'equipments', etc.
 }
-Key Relationships:nodes (poles) are central.nodes have photos associated with them.photos (specifically photofirst_data within them) contain wire and equipment annotations.These annotations have a _trace ID, which links to the traces object.The traces object provides the company (owner) and cable_type (description) for an attachment.connections link two nodes and have sections which can also have associated photos for mid-span details.3. Key Data Structures & Examples3.1. Node (Pole/Structure) DataPurpose: Basic information about each pole, its location, and attributes.Path: katapult_data['nodes'][NODE_ID]Snippet A: Node Object Example// From katapult_data['nodes']['-OJ_PMjpiNrD4UyT0JSz']
+
+Key Relationships:nodes (poles) are central.nodes have photos associated with them.photos (specifically photofirst_data within them) contain wire and equipment annotations.These annotations have a _trace ID, which links to the traces object.The traces object provides the company (owner) and cable_type (description) for an attachment.connections link two nodes and have sections which can also have associated photos for mid-span details.3. Key Data Structures & Examples3.1. Node (Pole/Structure) DataPurpose: Basic information about each pole, its location, and attributes.Path: katapult_data['nodes'][NODE_ID]Snippet A: Node Object Example - From katapult_data['nodes']['-OJ_PMjpiNrD4UyT0JSz']
+
 {
   "_created": {
     "method": "desktop",
@@ -62,7 +64,9 @@ Key Relationships:nodes (poles) are central.nodes have photos associated with th
     "-OJ_Pj99Rj_9rYnS5g-1": true // Example trace_id
   }
 }
-Key items for an agent/dev:NODE_ID (the key itself, e.g., "-OJ_PMjpiNrD4UyT0JSz"): Unique identifier for the pole within this JSON.attributes: Object containing detailed pole characteristics.latitude, longitude: Geographic coordinates.photos: Links to photo data where attachments are measured.connections: Links to spans connected to this pole.3.2. Node AttributesPurpose: Detailed characteristics of the pole.Path: katapult_data['nodes'][NODE_ID]['attributes']Snippet B: Node Attributes Example// From katapult_data['nodes']['-OJ_PMjpiNrD4UyT0JSz']['attributes']
+
+Key items for an agent/dev:NODE_ID (the key itself, e.g., "-OJ_PMjpiNrD4UyT0JSz"): Unique identifier for the pole within this JSON.attributes: Object containing detailed pole characteristics.latitude, longitude: Geographic coordinates.photos: Links to photo data where attachments are measured.connections: Links to spans connected to this pole.3.2. Node AttributesPurpose: Detailed characteristics of the pole.Path: katapult_data['nodes'][NODE_ID]['attributes']Snippet B: Node Attributes Example From katapult_data['nodes']['-OJ_PMjpiNrD4UyT0JSz']['attributes']
+
 {
   "Address Object": { // Address details
     "assessment": {
@@ -94,9 +98,12 @@ Key items for an agent/dev:NODE_ID (the key itself, e.g., "-OJ_PMjpiNrD4UyT0JSz"
   "mr_state": { "button_added": "engineering_complete" } // Make-ready status
   // ... many other potential attributes ...
 }
-Key items for an agent/dev:PoleNumber['-Imported'] or PoleNumber['assessment']: Primary pole identifier. Needs normalization.Address Object.assessment.formatted_address: Street address.PoleOwner.assessment: Owner of the pole.PoleHeight.assessment, PoleClass.assessment, PoleSpecies.assessment: Physical characteristics.existing_capacity_% / final_passing_capacity_%: PLA values (extract the nested numerical value).construction_grade_analysis.assessment: Grade of construction.3.3. Photo Data and Wire AnnotationsPurpose: Accessing measured attachment heights and linking them to owners/types.Path: katapult_data['nodes'][NODE_ID]['photos'][PHOTO_ID]['photofirst_data']['wire'] (Based on ryantest123 (1).json structure)Alternative Path: katapult_data['photo_summary'][PHOTO_ID]['photofirst_data']['wire']Snippet C: Photo Wire Annotation Example// From a node's ...['photos'][PHOTO_ID]['photofirst_data']['wire']
-// Example: katapult_data['nodes']['-OJ_PMjpiNrD4UyT0JSz']['photos']['e81cf8fa-2752-4f48-87ac-8d0b7dad557e']['photofirst_data']['wire']['-ONzZgPSoM6vjZpVuZCA']
+
+Key items for an agent/dev:PoleNumber['-Imported'] or PoleNumber['assessment']: Primary pole identifier. Needs normalization.Address Object.assessment.formatted_address: Street address.PoleOwner.assessment: Owner of the pole.PoleHeight.assessment, PoleClass.assessment, PoleSpecies.assessment: Physical characteristics.existing_capacity_% / final_passing_capacity_%: PLA values (extract the nested numerical value).construction_grade_analysis.assessment: Grade of construction.3.3. Photo Data and Wire AnnotationsPurpose: Accessing measured attachment heights and linking them to owners/types.Path: katapult_data['nodes'][NODE_ID]['photos'][PHOTO_ID]['photofirst_data']['wire'] (Based on ryantest123 (1).json structure)Alternative Path: katapult_data['photo_summary'][PHOTO_ID]['photofirst_data']['wire']Snippet C: Photo Wire Annotation Example From a node's ...['photos'][PHOTO_ID]['photofirst_data']['wire']
+
+Example: katapult_data['nodes']['-OJ_PMjpiNrD4UyT0JSz']['photos']['e81cf8fa-2752-4f48-87ac-8d0b7dad557e']['photofirst_data']['wire']['-ONzZgPSoM6vjZpVuZCA']
 // (Note: The actual wire data for this specific path might not be in the provided snippet, this is illustrative of structure)
+
 {
   // "-ONzZgPSoM6vjZpVuZCA": { // This is the wire_annotation_id (key)
     "_measured_height": "355.5", // **Attachment Height (typically INCHES)**
@@ -107,7 +114,9 @@ Key items for an agent/dev:PoleNumber['-Imported'] or PoleNumber['assessment']: 
     // ... other annotation metadata ...
   // }
 }
-Key items for an agent/dev:_measured_height: Attachment height, typically in INCHES. This value needs conversion._trace: Crucial ID that links this physical measurement to a specific cable/equipment type and owner via the traces object.3.4. Trace DataPurpose: Defining the owner (company) and type of a measured attachment.Path: katapult_data['traces']['trace_data'][TRACE_ID]Snippet D: Trace Data Example// From katapult_data['traces']['trace_data']['-OJ_Pj99Rj_9rYnS5g-1'] (linked from Snippet C)
+
+Key items for an agent/dev:_measured_height: Attachment height, typically in INCHES. This value needs conversion._trace: Crucial ID that links this physical measurement to a specific cable/equipment type and owner via the traces object.3.4. Trace DataPurpose: Defining the owner (company) and type of a measured attachment.Path: katapult_data['traces']['trace_data'][TRACE_ID]Snippet D: Trace Data Example - From katapult_data['traces']['trace_data']['-OJ_Pj99Rj_9rYnS5g-1'] (linked from Snippet C)
+
 {
   "_created": { /* ... */ },
   "cable_type": "Primary", // **Attachment Description/Type**
